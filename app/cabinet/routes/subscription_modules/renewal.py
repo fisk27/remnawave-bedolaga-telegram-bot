@@ -16,6 +16,7 @@ from app.config import settings
 from app.database.crud.tariff import get_tariff_by_id
 from app.database.models import PaymentMethod, SubscriptionStatus, User
 from app.services.pricing_engine import pricing_engine
+from app.services.spin_ticket_service import award_spin_tickets
 from app.services.subscription_renewal_service import (
     SubscriptionRenewalChargeError,
     SubscriptionRenewalService,
@@ -265,6 +266,13 @@ async def renew_subscription(
                 'message': 'Недостаточно средств (concurrent check)',
             },
         )
+
+    await award_spin_tickets(
+        db,
+        user,
+        period_days=request.period_days,
+        is_trial=False,
+    )
 
     response: dict[str, Any] = {
         'message': 'Subscription renewed successfully',

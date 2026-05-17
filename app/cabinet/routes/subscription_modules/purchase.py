@@ -36,6 +36,7 @@ from app.services.notification_delivery_service import (
     notification_delivery_service,
 )
 from app.services.pricing_engine import pricing_engine
+from app.services.spin_ticket_service import award_spin_tickets
 from app.services.subscription_purchase_service import (
     MiniAppSubscriptionPurchaseService,
     PurchaseBalanceError,
@@ -945,6 +946,13 @@ async def purchase_tariff(
 
         await db.refresh(user)
         await db.refresh(subscription)
+
+        await award_spin_tickets(
+            db,
+            user,
+            period_days=period_days,
+            is_trial=bool(getattr(subscription, 'is_trial', False)),
+        )
 
         response: dict[str, Any] = {
             'success': True,

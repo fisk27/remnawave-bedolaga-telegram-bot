@@ -24,6 +24,7 @@ from app.database.crud.transaction import create_transaction
 from app.database.crud.user import subtract_user_balance
 from app.database.models import PaymentMethod, ServerSquad, Subscription, SubscriptionStatus, TransactionType, User
 from app.localization.texts import get_texts
+from app.services.spin_ticket_service import award_spin_tickets
 from app.services.subscription_service import SubscriptionService
 from app.utils.pricing_utils import (
     apply_percentage_discount,
@@ -1227,6 +1228,13 @@ class MiniAppSubscriptionPurchaseService:
                 amount=texts.format_price(pricing.promo_discount_value),
             )
             message = f'{message}\n\n{note}'
+
+        await award_spin_tickets(
+            db,
+            user,
+            period_days=pricing.selection.period.days,
+            is_trial=(getattr(subscription, 'status', '') == 'trial'),
+        )
 
         return {
             'subscription': subscription,

@@ -14,6 +14,7 @@ class WheelPaymentType(StrEnum):
 
     TELEGRAM_STARS = 'telegram_stars'
     SUBSCRIPTION_DAYS = 'subscription_days'
+    TICKETS = 'tickets'
 
 
 class WheelPrizeType(StrEnum):
@@ -49,8 +50,10 @@ class WheelConfigResponse(BaseModel):
     name: str
     spin_cost_stars: int | None = None
     spin_cost_days: int | None = None
+    spin_cost_tickets: int | None = None
     spin_cost_stars_enabled: bool
     spin_cost_days_enabled: bool
+    spin_cost_tickets_enabled: bool = True
     prizes: list[WheelPrizeDisplay]
     daily_limit: int
     user_spins_today: int
@@ -62,6 +65,7 @@ class WheelConfigResponse(BaseModel):
     required_balance_kopeks: int = 0
     has_subscription: bool = False
     eligible_subscriptions: list[dict] | None = None
+    spin_tickets_balance: int = 0
 
 
 class SpinAvailabilityResponse(BaseModel):
@@ -164,8 +168,10 @@ class AdminWheelConfigResponse(BaseModel):
     name: str
     spin_cost_stars: int
     spin_cost_days: int
+    spin_cost_tickets: int = 1
     spin_cost_stars_enabled: bool
     spin_cost_days_enabled: bool
+    spin_cost_tickets_enabled: bool = True
     rtp_percent: int
     daily_spin_limit: int
     min_subscription_days_for_day_payment: int
@@ -186,8 +192,10 @@ class UpdateWheelConfigRequest(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=255)
     spin_cost_stars: int | None = Field(None, ge=1, le=1000)
     spin_cost_days: int | None = Field(None, ge=1, le=30)
+    spin_cost_tickets: int | None = Field(None, ge=1, le=100)
     spin_cost_stars_enabled: bool | None = None
     spin_cost_days_enabled: bool | None = None
+    spin_cost_tickets_enabled: bool | None = None
     rtp_percent: int | None = Field(None, ge=0, le=100)
     daily_spin_limit: int | None = Field(None, ge=0, le=100)
     min_subscription_days_for_day_payment: int | None = Field(None, ge=1, le=30)

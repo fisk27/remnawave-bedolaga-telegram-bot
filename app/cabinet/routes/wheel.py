@@ -91,8 +91,10 @@ async def get_wheel_config(
         name=config.name,
         spin_cost_stars=config.spin_cost_stars if config.spin_cost_stars_enabled else None,
         spin_cost_days=config.spin_cost_days if config.spin_cost_days_enabled else None,
+        spin_cost_tickets=config.spin_cost_tickets if config.spin_cost_tickets_enabled else None,
         spin_cost_stars_enabled=config.spin_cost_stars_enabled,
         spin_cost_days_enabled=config.spin_cost_days_enabled,
+        spin_cost_tickets_enabled=config.spin_cost_tickets_enabled,
         prizes=prizes_display,
         daily_limit=config.daily_spin_limit,
         user_spins_today=spins_today,
@@ -104,6 +106,7 @@ async def get_wheel_config(
         required_balance_kopeks=availability.required_balance_kopeks,
         has_subscription=has_subscription,
         eligible_subscriptions=eligible_subs_display,
+        spin_tickets_balance=user.spin_tickets,
     )
 
 

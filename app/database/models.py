@@ -202,6 +202,7 @@ class WheelSpinPaymentType(Enum):
 
     TELEGRAM_STARS = 'telegram_stars'
     SUBSCRIPTION_DAYS = 'subscription_days'
+    TICKETS = 'tickets'
 
 
 class YooKassaPayment(Base):
@@ -1865,6 +1866,7 @@ class User(Base):
     status = Column(String(20), default=UserStatus.ACTIVE.value)
     language = Column(String(5), default='ru')
     balance_kopeks = Column(Integer, default=0)
+    spin_tickets = Column(Integer, default=0, nullable=False)
     used_promocodes = Column(Integer, default=0)
     has_had_paid_subscription = Column(Boolean, default=False, nullable=False)
     referred_by_id = Column(Integer, ForeignKey('users.id', ondelete='SET NULL'), nullable=True, index=True)
@@ -3574,6 +3576,8 @@ class WheelConfig(Base):
     spin_cost_days = Column(Integer, default=1, nullable=False)  # Стоимость в днях подписки
     spin_cost_stars_enabled = Column(Boolean, default=True, nullable=False)
     spin_cost_days_enabled = Column(Boolean, default=True, nullable=False)
+    spin_cost_tickets = Column(Integer, default=1, nullable=False)  # Стоимость в билетах
+    spin_cost_tickets_enabled = Column(Boolean, default=True, nullable=False)
 
     # RTP настройки (Return to Player) - процент возврата 0-100
     rtp_percent = Column(Integer, default=80, nullable=False)

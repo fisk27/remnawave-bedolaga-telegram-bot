@@ -646,6 +646,29 @@ class FortuneWheelService:
                     )
                 payment_amount = config.spin_cost_days
                 payment_value_kopeks = await self._process_days_payment(db, user, config, target_subscription)
+            elif payment_type == WheelSpinPaymentType.TICKETS.value:
+                if not config.spin_cost_tickets_enabled:
+                    return SpinResult(
+                        success=False,
+                        error='cannot_pay_tickets',
+                        message='Оплата билетами недоступна',
+                    )
+                if (user.spin_tickets or 0) < config.spin_cost_tickets:
+                    return SpinResult(
+                        success=False,
+                        error='insufficient_tickets',
+                        message='Недостаточно билетов',
+                    )
+                user.spin_tickets -= config.spin_cost_tickets
+                await db.flush()
+                logger.info(
+                    '🎟️ Списано билетов с user_id',
+                    spin_cost_tickets=config.spin_cost_tickets,
+                    user_id=user.id,
+                    remaining_tickets=user.spin_tickets,
+                )
+                payment_amount = config.spin_cost_tickets
+                payment_value_kopeks = 0
             else:
                 return SpinResult(
                     success=False,
