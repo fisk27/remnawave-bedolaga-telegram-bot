@@ -309,33 +309,38 @@ class FortuneWheelService:
             # Все призы отфильтрованы — откатываемся на исходный список, чтобы не падать
             candidates = list(prizes_with_probabilities)
 
-        # c) Буст вероятности в последний день окна (×10), только в памяти
-        boosted: list[tuple[WheelPrize, float]] = []
-        for prize, prob in candidates:
+        # c) Гарантированный дроп в последний день окна: если есть невыданные
+        #    призы с monthly_limit, у которых сегодня — последний день окна,
+        #    один из них выпадает гарантированно (минуя взвешенный random).
+        forced_candidates = [
+            prize
+            for prize, _ in candidates
             if (
                 prize.window_end_day == current_day
                 and prize.monthly_limit is not None
                 and prize.monthly_wins_count < prize.monthly_limit
-            ):
-                boosted.append((prize, prob * 10))
-            else:
-                boosted.append((prize, prob))
+            )
+        ]
 
-        # Нормализуем вероятности после фильтрации/буста
-        total = sum(p for _, p in boosted)
-        if total > 0:
-            boosted = [(prize, prob / total) for prize, prob in boosted]
+        if forced_candidates:
+            selected: WheelPrize = rng.choice(forced_candidates)
+        else:
+            # Нормализуем вероятности оставшихся кандидатов после фильтрации
+            total = sum(p for _, p in candidates)
+            normalized = (
+                [(prize, prob / total) for prize, prob in candidates]
+                if total > 0
+                else list(candidates)
+            )
 
-        rand = rng.random()
-        cumulative = 0.0
-        selected: WheelPrize | None = None
-        for prize, probability in boosted:
-            cumulative += probability
-            if rand <= cumulative:
-                selected = prize
-                break
-        if selected is None:
-            selected = boosted[-1][0]
+            rand = rng.random()
+            cumulative = 0.0
+            selected = normalized[-1][0]
+            for prize, probability in normalized:
+                cumulative += probability
+                if rand <= cumulative:
+                    selected = prize
+                    break
 
         # d) Если у выбранного приза задан месячный лимит — фиксируем победителя
         if selected.monthly_limit is not None:
