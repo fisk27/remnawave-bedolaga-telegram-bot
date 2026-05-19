@@ -156,6 +156,11 @@ class WheelPrizeAdminResponse(BaseModel):
     promo_balance_bonus_kopeks: int = 0
     promo_subscription_days: int = 0
     promo_traffic_gb: int = 0
+    monthly_limit: int | None = None
+    monthly_wins_count: int = 0
+    window_start_day: int | None = None
+    window_end_day: int | None = None
+    current_month_winner: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -221,6 +226,9 @@ class CreatePrizeRequest(BaseModel):
     promo_balance_bonus_kopeks: int = Field(default=0, ge=0)
     promo_subscription_days: int = Field(default=0, ge=0)
     promo_traffic_gb: int = Field(default=0, ge=0)
+    monthly_limit: int | None = Field(None, ge=1)
+    window_start_day: int | None = Field(None, ge=1, le=28)
+    window_end_day: int | None = Field(None, ge=1, le=28)
 
 
 class UpdatePrizeRequest(BaseModel):
@@ -238,6 +246,9 @@ class UpdatePrizeRequest(BaseModel):
     promo_balance_bonus_kopeks: int | None = Field(None, ge=0)
     promo_subscription_days: int | None = Field(None, ge=0)
     promo_traffic_gb: int | None = Field(None, ge=0)
+    monthly_limit: int | None = Field(None, ge=1)
+    window_start_day: int | None = Field(None, ge=1, le=28)
+    window_end_day: int | None = Field(None, ge=1, le=28)
 
 
 class ReorderPrizesRequest(BaseModel):

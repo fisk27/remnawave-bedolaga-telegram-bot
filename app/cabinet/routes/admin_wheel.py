@@ -65,6 +65,11 @@ async def get_admin_wheel_config(
             promo_balance_bonus_kopeks=p.promo_balance_bonus_kopeks or 0,
             promo_subscription_days=p.promo_subscription_days or 0,
             promo_traffic_gb=p.promo_traffic_gb or 0,
+            monthly_limit=p.monthly_limit,
+            monthly_wins_count=p.monthly_wins_count or 0,
+            window_start_day=p.window_start_day,
+            window_end_day=p.window_end_day,
+            current_month_winner=p.current_month_winner,
             created_at=p.created_at,
             updated_at=p.updated_at,
         )
@@ -128,6 +133,11 @@ async def update_admin_wheel_config(
             promo_balance_bonus_kopeks=p.promo_balance_bonus_kopeks or 0,
             promo_subscription_days=p.promo_subscription_days or 0,
             promo_traffic_gb=p.promo_traffic_gb or 0,
+            monthly_limit=p.monthly_limit,
+            monthly_wins_count=p.monthly_wins_count or 0,
+            window_start_day=p.window_start_day,
+            window_end_day=p.window_end_day,
+            current_month_winner=p.current_month_winner,
             created_at=p.created_at,
             updated_at=p.updated_at,
         )
@@ -178,6 +188,11 @@ async def get_prizes(
             promo_balance_bonus_kopeks=p.promo_balance_bonus_kopeks or 0,
             promo_subscription_days=p.promo_subscription_days or 0,
             promo_traffic_gb=p.promo_traffic_gb or 0,
+            monthly_limit=p.monthly_limit,
+            monthly_wins_count=p.monthly_wins_count or 0,
+            window_start_day=p.window_start_day,
+            window_end_day=p.window_end_day,
+            current_month_winner=p.current_month_winner,
             created_at=p.created_at,
             updated_at=p.updated_at,
         )
@@ -209,6 +224,9 @@ async def create_prize(
         promo_balance_bonus_kopeks=request.promo_balance_bonus_kopeks,
         promo_subscription_days=request.promo_subscription_days,
         promo_traffic_gb=request.promo_traffic_gb,
+        monthly_limit=request.monthly_limit,
+        window_start_day=request.window_start_day,
+        window_end_day=request.window_end_day,
     )
 
     logger.info('🎁 Admin created prize', telegram_id=admin.telegram_id, display_name=prize.display_name)
@@ -228,6 +246,11 @@ async def create_prize(
         promo_balance_bonus_kopeks=prize.promo_balance_bonus_kopeks or 0,
         promo_subscription_days=prize.promo_subscription_days or 0,
         promo_traffic_gb=prize.promo_traffic_gb or 0,
+        monthly_limit=prize.monthly_limit,
+        monthly_wins_count=prize.monthly_wins_count or 0,
+        window_start_day=prize.window_start_day,
+        window_end_day=prize.window_end_day,
+        current_month_winner=prize.current_month_winner,
         created_at=prize.created_at,
         updated_at=prize.updated_at,
     )
@@ -278,6 +301,11 @@ async def update_prize(
         promo_balance_bonus_kopeks=prize.promo_balance_bonus_kopeks or 0,
         promo_subscription_days=prize.promo_subscription_days or 0,
         promo_traffic_gb=prize.promo_traffic_gb or 0,
+        monthly_limit=prize.monthly_limit,
+        monthly_wins_count=prize.monthly_wins_count or 0,
+        window_start_day=prize.window_start_day,
+        window_end_day=prize.window_end_day,
+        current_month_winner=prize.current_month_winner,
         created_at=prize.created_at,
         updated_at=prize.updated_at,
     )

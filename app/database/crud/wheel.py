@@ -109,6 +109,9 @@ async def create_wheel_prize(
     promo_balance_bonus_kopeks: int = 0,
     promo_subscription_days: int = 0,
     promo_traffic_gb: int = 0,
+    monthly_limit: int | None = None,
+    window_start_day: int | None = None,
+    window_end_day: int | None = None,
 ) -> WheelPrize:
     """Создать новый приз на колесе."""
     prize = WheelPrize(
@@ -125,6 +128,9 @@ async def create_wheel_prize(
         promo_balance_bonus_kopeks=promo_balance_bonus_kopeks,
         promo_subscription_days=promo_subscription_days,
         promo_traffic_gb=promo_traffic_gb,
+        monthly_limit=monthly_limit,
+        window_start_day=window_start_day,
+        window_end_day=window_end_day,
     )
     db.add(prize)
     await db.commit()
