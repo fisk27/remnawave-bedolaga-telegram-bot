@@ -3629,6 +3629,14 @@ class WheelPrize(Base):
     promo_subscription_days = Column(Integer, default=0)
     promo_traffic_gb = Column(Integer, default=0)
 
+    # Месячные ограничения и окно доступности
+    monthly_limit = Column(Integer, nullable=True)  # NULL = без ограничений
+    monthly_wins_count = Column(Integer, default=0, nullable=False)
+    window_start_day = Column(Integer, nullable=True)  # 1-28
+    window_end_day = Column(Integer, nullable=True)  # 1-28
+    current_month_winner = Column(String(100), nullable=True)  # маскированный username
+    last_reset_month = Column(Integer, nullable=True)  # номер месяца последнего сброса счетчика
+
     created_at = Column(AwareDateTime(), default=func.now())
     updated_at = Column(AwareDateTime(), default=func.now(), onupdate=func.now())
 
@@ -3666,6 +3674,9 @@ class WheelSpin(Base):
     # Флаг успешного начисления
     is_applied = Column(Boolean, default=False, nullable=False)
     applied_at = Column(AwareDateTime(), nullable=True)
+
+    # UUID, выставляемый клиентом до RPC, чтобы UNIQUE-индекс блокировал повторный спин
+    spin_nonce = Column(String(36), nullable=True, unique=True)
 
     created_at = Column(AwareDateTime(), default=func.now())
 

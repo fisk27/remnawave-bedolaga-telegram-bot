@@ -190,6 +190,7 @@ async def create_wheel_spin(
     prize_value_kopeks: int,
     generated_promocode_id: int | None = None,
     is_applied: bool = False,
+    spin_nonce: str | None = None,
 ) -> WheelSpin:
     """Создать запись о спине колеса."""
     spin = WheelSpin(
@@ -205,6 +206,7 @@ async def create_wheel_spin(
         generated_promocode_id=generated_promocode_id,
         is_applied=is_applied,
         applied_at=datetime.now(UTC) if is_applied else None,
+        spin_nonce=spin_nonce,
     )
     db.add(spin)
     await db.commit()

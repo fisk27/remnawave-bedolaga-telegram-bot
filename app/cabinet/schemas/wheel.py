@@ -38,6 +38,9 @@ class WheelPrizeDisplay(BaseModel):
     emoji: str
     color: str
     prize_type: str
+    monthly_limit: int | None = None
+    is_available: bool = True
+    current_month_winner: str | None = None
 
     class Config:
         from_attributes = True

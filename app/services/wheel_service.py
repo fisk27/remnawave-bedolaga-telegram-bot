@@ -4,12 +4,14 @@
 
 import random
 import secrets
+import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
 import structlog
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -30,12 +32,15 @@ from app.database.models import (
     WheelConfig,
     WheelPrize,
     WheelPrizeType,
+    WheelSpin,
     WheelSpinPaymentType,
 )
 from app.services.subscription_service import SubscriptionService
 
 
 logger = structlog.get_logger(__name__)
+
+rng = secrets.SystemRandom()
 
 
 @dataclass
@@ -256,21 +261,89 @@ class FortuneWheelService:
 
         return result
 
-    def _select_prize(self, prizes_with_probabilities: list[tuple[WheelPrize, float]]) -> WheelPrize:
-        """Выбрать приз на основе вероятностей."""
+    @staticmethod
+    def _mask_username(user: User) -> str:
+        """Маскировать имя пользователя для публичного отображения (например, 'Alexander' -> 'Al*****r')."""
+        name = (user.username or user.first_name or '').strip()
+        if len(name) <= 3:
+            return name or 'User'
+        return f'{name[:2]}*****{name[-1]}'
+
+    async def _select_prize(
+        self,
+        db: AsyncSession,
+        user: User,
+        prizes_with_probabilities: list[tuple[WheelPrize, float]],
+    ) -> WheelPrize:
+        """Выбрать приз на основе вероятностей с учетом месячных лимитов и окон доступности."""
         if not prizes_with_probabilities:
             raise ValueError('No prizes to select from')
 
-        rand = random.random()
-        cumulative = 0.0
+        now = datetime.now(UTC)
+        current_month = now.month
+        current_day = now.day
 
-        for prize, probability in prizes_with_probabilities:
+        # a) Сбрасываем месячные счетчики, если сменился месяц
+        needs_flush = False
+        for prize, _ in prizes_with_probabilities:
+            if prize.monthly_limit is not None and prize.last_reset_month != current_month:
+                prize.monthly_wins_count = 0
+                prize.current_month_winner = None
+                prize.last_reset_month = current_month
+                needs_flush = True
+        if needs_flush:
+            await db.flush()
+
+        # b) Отфильтровываем недоступные призы (лимит исчерпан / вне окна доступности)
+        candidates: list[tuple[WheelPrize, float]] = []
+        for prize, prob in prizes_with_probabilities:
+            if prize.monthly_limit is not None and prize.monthly_wins_count >= prize.monthly_limit:
+                continue
+            if prize.window_start_day is not None and current_day < prize.window_start_day:
+                continue
+            if prize.window_end_day is not None and current_day > prize.window_end_day:
+                continue
+            candidates.append((prize, prob))
+
+        if not candidates:
+            # Все призы отфильтрованы — откатываемся на исходный список, чтобы не падать
+            candidates = list(prizes_with_probabilities)
+
+        # c) Буст вероятности в последний день окна (×10), только в памяти
+        boosted: list[tuple[WheelPrize, float]] = []
+        for prize, prob in candidates:
+            if (
+                prize.window_end_day == current_day
+                and prize.monthly_limit is not None
+                and prize.monthly_wins_count < prize.monthly_limit
+            ):
+                boosted.append((prize, prob * 10))
+            else:
+                boosted.append((prize, prob))
+
+        # Нормализуем вероятности после фильтрации/буста
+        total = sum(p for _, p in boosted)
+        if total > 0:
+            boosted = [(prize, prob / total) for prize, prob in boosted]
+
+        rand = rng.random()
+        cumulative = 0.0
+        selected: WheelPrize | None = None
+        for prize, probability in boosted:
             cumulative += probability
             if rand <= cumulative:
-                return prize
+                selected = prize
+                break
+        if selected is None:
+            selected = boosted[-1][0]
 
-        # Fallback на последний приз
-        return prizes_with_probabilities[-1][0]
+        # d) Если у выбранного приза задан месячный лимит — фиксируем победителя
+        if selected.monthly_limit is not None:
+            selected.monthly_wins_count = (selected.monthly_wins_count or 0) + 1
+            selected.current_month_winner = self._mask_username(user)
+            await db.flush()
+
+        return selected
 
     def _calculate_rotation(self, prizes: list[WheelPrize], selected_prize: WheelPrize) -> float:
         """
@@ -580,6 +653,21 @@ class FortuneWheelService:
         6. Вернуть результат
         """
         try:
+            # 0. Anti-abuse cooldown: запрещаем повторный спин в течение 3 секунд
+            cooldown_threshold = datetime.now(UTC) - timedelta(seconds=3)
+            recent_spin = await db.execute(
+                select(WheelSpin.id)
+                .where(WheelSpin.user_id == user.id)
+                .where(WheelSpin.created_at > cooldown_threshold)
+                .limit(1)
+            )
+            if recent_spin.scalar_one_or_none() is not None:
+                return SpinResult(
+                    success=False,
+                    error='cooldown',
+                    message='Подождите перед следующим вращением',
+                )
+
             # 1. Проверяем доступность
             availability = await self.check_availability(db, user)
             if not availability.can_spin:
@@ -678,7 +766,7 @@ class FortuneWheelService:
 
             # 3. Рассчитываем вероятности и выбираем приз
             prizes_with_probs = self.calculate_prize_probabilities(config, prizes, payment_value_kopeks)
-            selected_prize = self._select_prize(prizes_with_probs)
+            selected_prize = await self._select_prize(db, user, prizes_with_probs)
 
             # 4. Рассчитываем угол для анимации
             rotation = self._calculate_rotation(prizes, selected_prize)
@@ -711,6 +799,7 @@ class FortuneWheelService:
                 prize_value_kopeks=selected_prize.prize_value_kopeks,
                 generated_promocode_id=promocode_id,
                 is_applied=True,
+                spin_nonce=str(uuid.uuid4()),
             )
 
             await db.commit()

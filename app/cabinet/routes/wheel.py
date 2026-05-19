@@ -4,6 +4,7 @@ API роуты колеса удачи для пользователей.
 
 import math
 import time
+from datetime import UTC, datetime
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -67,6 +68,19 @@ async def get_wheel_config(
         subscription = await get_subscription_by_user_id(db, user.id)
     has_subscription = subscription is not None and subscription.is_active
 
+    today = datetime.now(UTC).day
+
+    def _is_prize_available(p) -> bool:
+        if p.monthly_limit is None:
+            return True
+        if (p.monthly_wins_count or 0) >= p.monthly_limit:
+            return False
+        if p.window_start_day is not None and today < p.window_start_day:
+            return False
+        if p.window_end_day is not None and today > p.window_end_day:
+            return False
+        return True
+
     prizes_display = [
         WheelPrizeDisplay(
             id=p.id,
@@ -74,6 +88,9 @@ async def get_wheel_config(
             emoji=p.emoji,
             color=p.color,
             prize_type=p.prize_type,
+            monthly_limit=p.monthly_limit,
+            is_available=_is_prize_available(p),
+            current_month_winner=p.current_month_winner,
         )
         for p in prizes
     ]
