@@ -15,6 +15,7 @@ from typing import Any
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,13 +31,13 @@ from app.database.crud.subscription import (
 from app.database.crud.tariff import get_tariff_by_id, get_tariffs_for_user
 from app.database.crud.transaction import create_transaction
 from app.database.crud.user import add_user_balance, subtract_user_balance
-from app.database.models import PaymentMethod, Subscription, Tariff, TransactionType, User
+from app.database.models import PaymentMethod, Subscription, Tariff, Transaction, TransactionType, User
 from app.services.notification_delivery_service import (
     NotificationType,
     notification_delivery_service,
 )
 from app.services.pricing_engine import pricing_engine
-from app.services.spin_ticket_service import award_spin_tickets
+from app.services.spin_ticket_service import award_referral_tickets, award_spin_tickets
 from app.services.subscription_purchase_service import (
     MiniAppSubscriptionPurchaseService,
     PurchaseBalanceError,
@@ -953,6 +954,19 @@ async def purchase_tariff(
             period_days=period_days,
             is_trial=bool(getattr(subscription, 'is_trial', False)),
         )
+
+        tx_count = (
+            await db.execute(
+                select(func.count())
+                .select_from(Transaction)
+                .where(
+                    Transaction.user_id == user.id,
+                    Transaction.type == TransactionType.SUBSCRIPTION_PAYMENT.value,
+                    Transaction.is_completed.is_(True),
+                )
+            )
+        ).scalar()
+        await award_referral_tickets(db, user, is_first_purchase=(tx_count <= 1))
 
         response: dict[str, Any] = {
             'success': True,

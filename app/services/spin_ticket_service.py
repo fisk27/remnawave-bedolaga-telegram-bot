@@ -12,6 +12,7 @@ owned by the wheel service.
 from __future__ import annotations
 
 import structlog
+from sqlalchemy import update as sql_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.models import User
@@ -61,3 +62,32 @@ async def award_spin_tickets(
         new_balance=user.spin_tickets,
     )
     return tickets
+
+
+async def award_referral_tickets(
+    db: AsyncSession,
+    user: User,
+    is_first_purchase: bool,
+) -> None:
+    """Award 1 ticket to referrer and 1 extra to the referred user on first purchase."""
+    if not is_first_purchase or not user.referred_by_id:
+        return
+
+    await db.execute(
+        sql_update(User)
+        .where(User.id == user.referred_by_id)
+        .values(spin_tickets=User.spin_tickets + 1)
+    )
+    await db.execute(
+        sql_update(User)
+        .where(User.id == user.id)
+        .values(spin_tickets=User.spin_tickets + 1)
+    )
+    await db.flush()
+    await db.commit()
+
+    logger.info(
+        '🎟️ Referral tickets awarded',
+        referrer_id=user.referred_by_id,
+        referred_user_id=user.id,
+    )
