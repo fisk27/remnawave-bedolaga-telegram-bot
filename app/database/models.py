@@ -3699,6 +3699,23 @@ class WheelSpin(Base):
         return f"<WheelSpin id={self.id} user_id={self.user_id} prize='{self.prize_display_name}'>"
 
 
+class RaffleEntry(Base):
+    """Отдельный пронумерованный билет для розыгрыша. id — это номер билета."""
+
+    __tablename__ = 'raffle_entries'
+    __table_args__ = (Index('ix_raffle_entries_user_id', 'user_id'),)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    source = Column(String(20), nullable=False)
+    created_at = Column(AwareDateTime(), nullable=False, server_default=func.now())
+
+    user = relationship('User', backref='raffle_entries')
+
+    def __repr__(self) -> str:
+        return f"<RaffleEntry id={self.id} user_id={self.user_id} source={self.source}>"
+
+
 class TicketNotification(Base):
     """Уведомления о тикетах для кабинета (веб-интерфейс)."""
 

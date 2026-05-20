@@ -58,6 +58,7 @@ from .partner_application import router as partner_application_router
 from .polls import router as polls_router
 from .promo import router as promo_router
 from .promocode import router as promocode_router
+from .raffle import router as raffle_router
 from .referral import router as referral_router
 from .site_verification import router as site_verification_router
 from .subscription import router as subscription_router
@@ -112,6 +113,9 @@ router.include_router(info_pages_router)
 
 # Wheel routes
 router.include_router(wheel_router)
+
+# Raffle routes
+router.include_router(raffle_router)
 
 # Gift routes
 router.include_router(gift_router)

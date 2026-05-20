@@ -69,6 +69,7 @@ class WheelConfigResponse(BaseModel):
     has_subscription: bool = False
     eligible_subscriptions: list[dict] | None = None
     spin_tickets_balance: int = 0
+    raffle_tickets_balance: int = 0
 
 
 class SpinAvailabilityResponse(BaseModel):

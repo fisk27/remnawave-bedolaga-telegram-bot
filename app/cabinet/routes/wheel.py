@@ -124,6 +124,7 @@ async def get_wheel_config(
         has_subscription=has_subscription,
         eligible_subscriptions=eligible_subs_display,
         spin_tickets_balance=user.spin_tickets,
+        raffle_tickets_balance=user.raffle_tickets or 0,
     )
 
 

@@ -15,7 +15,7 @@ import structlog
 from sqlalchemy import update as sql_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database.models import User
+from app.database.models import RaffleEntry, User
 
 
 logger = structlog.get_logger(__name__)
@@ -58,6 +58,7 @@ async def award_spin_tickets(
             raffle_tickets=User.raffle_tickets + tickets,
         )
     )
+    db.add_all([RaffleEntry(user_id=user.id, source='purchase') for _ in range(tickets)])
     await db.flush()
     await db.refresh(user)
     await db.commit()
@@ -92,6 +93,10 @@ async def award_referral_tickets(
         .where(User.id == user.id)
         .values(raffle_tickets=User.raffle_tickets + 1)
     )
+    db.add_all([
+        RaffleEntry(user_id=user.referred_by_id, source='referral'),
+        RaffleEntry(user_id=user.id, source='referral'),
+    ])
     await db.flush()
     await db.commit()
 
