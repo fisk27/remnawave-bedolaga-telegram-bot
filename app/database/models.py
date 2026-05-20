@@ -1867,6 +1867,7 @@ class User(Base):
     language = Column(String(5), default='ru')
     balance_kopeks = Column(Integer, default=0)
     spin_tickets = Column(Integer, default=0, nullable=False)
+    raffle_tickets = Column(Integer, default=0, nullable=False)
     used_promocodes = Column(Integer, default=0)
     has_had_paid_subscription = Column(Boolean, default=False, nullable=False)
     referred_by_id = Column(Integer, ForeignKey('users.id', ondelete='SET NULL'), nullable=True, index=True)

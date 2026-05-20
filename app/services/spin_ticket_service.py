@@ -50,8 +50,16 @@ async def award_spin_tickets(
     if tickets <= 0:
         return 0
 
-    user.spin_tickets = (user.spin_tickets or 0) + tickets
+    await db.execute(
+        sql_update(User)
+        .where(User.id == user.id)
+        .values(
+            spin_tickets=User.spin_tickets + tickets,
+            raffle_tickets=User.raffle_tickets + tickets,
+        )
+    )
     await db.flush()
+    await db.refresh(user)
     await db.commit()
 
     logger.info(
@@ -60,6 +68,7 @@ async def award_spin_tickets(
         period_days=period_days,
         tickets_awarded=tickets,
         new_balance=user.spin_tickets,
+        raffle_balance=user.raffle_tickets,
     )
     return tickets
 
@@ -76,12 +85,12 @@ async def award_referral_tickets(
     await db.execute(
         sql_update(User)
         .where(User.id == user.referred_by_id)
-        .values(spin_tickets=User.spin_tickets + 1)
+        .values(raffle_tickets=User.raffle_tickets + 1)
     )
     await db.execute(
         sql_update(User)
         .where(User.id == user.id)
-        .values(spin_tickets=User.spin_tickets + 1)
+        .values(raffle_tickets=User.raffle_tickets + 1)
     )
     await db.flush()
     await db.commit()
