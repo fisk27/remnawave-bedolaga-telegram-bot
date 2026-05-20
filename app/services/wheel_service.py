@@ -11,7 +11,7 @@ from decimal import Decimal
 from typing import Any
 
 import structlog
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -746,14 +746,19 @@ class FortuneWheelService:
                         error='cannot_pay_tickets',
                         message='Оплата билетами недоступна',
                     )
-                if (user.spin_tickets or 0) < config.spin_cost_tickets:
+                result = await db.execute(
+                    update(User)
+                    .where(User.id == user.id, User.spin_tickets >= config.spin_cost_tickets)
+                    .values(spin_tickets=User.spin_tickets - config.spin_cost_tickets)
+                )
+                if result.rowcount == 0:
                     return SpinResult(
                         success=False,
                         error='insufficient_tickets',
                         message='Недостаточно билетов',
                     )
-                user.spin_tickets -= config.spin_cost_tickets
                 await db.flush()
+                await db.refresh(user)
                 logger.info(
                     '🎟️ Списано билетов с user_id',
                     spin_cost_tickets=config.spin_cost_tickets,
