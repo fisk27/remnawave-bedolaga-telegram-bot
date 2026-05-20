@@ -1,17 +1,17 @@
 """Helper for awarding fortune-wheel spin tickets.
 
-Tickets are earned when a user purchases (renews or extends) a *paid*
-subscription — 1 ticket per 30 days of subscription time. Trial
-subscriptions intentionally award nothing so the bonus is gated to
-paying customers.
-
-This module owns the +N mutation on ``User.spin_tickets``. Spending is
-owned by the wheel service.
+Two separate ticket systems:
+- spin_tickets: spent on fortune wheel spins. Earned from subscription purchase/renewal only.
+- raffle_tickets: accumulated for giveaway drawing. Earned from purchases AND referrals. Never spent, only counted.
+Both are awarded on purchase/renewal. Only raffle_tickets are awarded for referrals.
 """
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import structlog
+from sqlalchemy import and_, func, select
 from sqlalchemy import update as sql_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,6 +22,7 @@ logger = structlog.get_logger(__name__)
 
 
 TICKET_PERIOD_DAYS = 30
+REFERRAL_TICKETS_DAILY_LIMIT = 10
 
 
 async def award_spin_tickets(
@@ -44,10 +45,12 @@ async def award_spin_tickets(
         return 0
 
     if period_days <= 0:
+        logger.debug('No tickets to award', period_days=period_days, user_id=user.id)
         return 0
 
     tickets = period_days // TICKET_PERIOD_DAYS
     if tickets <= 0:
+        logger.debug('No tickets to award', period_days=period_days, user_id=user.id)
         return 0
 
     await db.execute(
@@ -59,9 +62,9 @@ async def award_spin_tickets(
         )
     )
     db.add_all([RaffleEntry(user_id=user.id, source='purchase') for _ in range(tickets)])
+    # Caller must commit — we only flush to get values into the session
     await db.flush()
     await db.refresh(user)
-    await db.commit()
 
     logger.info(
         '🎟️ Spin tickets awarded',
@@ -83,11 +86,39 @@ async def award_referral_tickets(
     if not is_first_purchase or not user.referred_by_id:
         return
 
-    await db.execute(
+    if user.referred_by_id == user.id:
+        logger.warning('Self-referral detected, skipping', user_id=user.id)
+        return
+
+    # Rate limit: cap referral tickets per referrer per day to make farming uneconomic.
+    today_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+    today_referral_count = (await db.execute(
+        select(func.count()).select_from(RaffleEntry).where(
+            and_(
+                RaffleEntry.user_id == user.referred_by_id,
+                RaffleEntry.source == 'referral',
+                RaffleEntry.created_at >= today_start,
+            )
+        )
+    )).scalar() or 0
+
+    if today_referral_count >= REFERRAL_TICKETS_DAILY_LIMIT:
+        logger.warning(
+            'Referral ticket daily limit reached',
+            referrer_id=user.referred_by_id,
+            count=today_referral_count,
+        )
+        return
+
+    result = await db.execute(
         sql_update(User)
         .where(User.id == user.referred_by_id)
         .values(raffle_tickets=User.raffle_tickets + 1)
     )
+    if result.rowcount == 0:
+        logger.warning('Referrer not found, skipping', referrer_id=user.referred_by_id)
+        return
+
     await db.execute(
         sql_update(User)
         .where(User.id == user.id)
@@ -97,8 +128,8 @@ async def award_referral_tickets(
         RaffleEntry(user_id=user.referred_by_id, source='referral'),
         RaffleEntry(user_id=user.id, source='referral'),
     ])
+    # Caller must commit — we only flush to get values into the session
     await db.flush()
-    await db.commit()
 
     logger.info(
         '🎟️ Referral tickets awarded',

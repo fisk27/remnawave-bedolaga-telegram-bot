@@ -93,6 +93,8 @@ async def _handle_wheel_spin_payment(
 
         # Рассчитываем вероятности и выбираем приз
         prizes_with_probs = wheel_service.calculate_prize_probabilities(config, prizes, payment_value_kopeks)
+        # TODO: BROKEN — _select_prize signature changed to async def _select_prize(self, db, user, prizes_with_probabilities)
+        # This call needs to be updated if Stars payment is ever re-enabled
         selected_prize = wheel_service._select_prize(prizes_with_probs)
 
         # Применяем приз

@@ -139,6 +139,9 @@ async def create_wheel_prize(
     return prize
 
 
+NULLABLE_PRIZE_FIELDS = {'monthly_limit', 'window_start_day', 'window_end_day'}
+
+
 async def update_wheel_prize(db: AsyncSession, prize_id: int, **kwargs) -> WheelPrize | None:
     """Обновить приз колеса."""
     prize = await get_wheel_prize_by_id(db, prize_id)
@@ -146,7 +149,7 @@ async def update_wheel_prize(db: AsyncSession, prize_id: int, **kwargs) -> Wheel
         return None
 
     for key, value in kwargs.items():
-        if hasattr(prize, key) and value is not None:
+        if hasattr(prize, key) and (key in NULLABLE_PRIZE_FIELDS or value is not None):
             setattr(prize, key, value)
 
     prize.updated_at = datetime.now(UTC)

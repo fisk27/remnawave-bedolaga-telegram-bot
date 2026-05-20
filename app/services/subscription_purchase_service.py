@@ -1235,6 +1235,7 @@ class MiniAppSubscriptionPurchaseService:
             period_days=pricing.selection.period.days,
             is_trial=(getattr(subscription, 'status', '') == 'trial'),
         )
+        await db.commit()
 
         return {
             'subscription': subscription,

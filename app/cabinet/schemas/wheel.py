@@ -3,7 +3,7 @@
 from datetime import datetime
 from enum import StrEnum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 # ==================== ENUMS ====================
@@ -231,6 +231,13 @@ class CreatePrizeRequest(BaseModel):
     window_start_day: int | None = Field(None, ge=1, le=28)
     window_end_day: int | None = Field(None, ge=1, le=28)
 
+    @model_validator(mode='after')
+    def validate_window(self):
+        if self.window_start_day is not None and self.window_end_day is not None:
+            if self.window_start_day > self.window_end_day:
+                raise ValueError('window_start_day must be <= window_end_day')
+        return self
+
 
 class UpdatePrizeRequest(BaseModel):
     """Запрос на обновление приза."""
@@ -250,6 +257,13 @@ class UpdatePrizeRequest(BaseModel):
     monthly_limit: int | None = Field(None, ge=1)
     window_start_day: int | None = Field(None, ge=1, le=28)
     window_end_day: int | None = Field(None, ge=1, le=28)
+
+    @model_validator(mode='after')
+    def validate_window(self):
+        if self.window_start_day is not None and self.window_end_day is not None:
+            if self.window_start_day > self.window_end_day:
+                raise ValueError('window_start_day must be <= window_end_day')
+        return self
 
 
 class ReorderPrizesRequest(BaseModel):

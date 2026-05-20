@@ -71,9 +71,13 @@ async def get_wheel_config(
     today = datetime.now(UTC).day
 
     def _is_prize_available(p) -> bool:
-        if p.monthly_limit is None:
-            return True
-        if (p.monthly_wins_count or 0) >= p.monthly_limit:
+        # Mirror wheel_service._select_prize filtering exactly so the frontend
+        # never shows "available" for a prize the backend would skip.
+        # Backend filters out a prize if ANY of these are true:
+        #   - monthly_limit set AND monthly_wins_count >= monthly_limit
+        #   - window_start_day set AND today < window_start_day
+        #   - window_end_day set AND today > window_end_day
+        if p.monthly_limit is not None and (p.monthly_wins_count or 0) >= p.monthly_limit:
             return False
         if p.window_start_day is not None and today < p.window_start_day:
             return False

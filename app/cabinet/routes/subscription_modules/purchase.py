@@ -948,6 +948,11 @@ async def purchase_tariff(
         await db.refresh(user)
         await db.refresh(subscription)
 
+        # NOTE: ticket awards run outside the user lock that subtract_user_balance held —
+        # two concurrent cabinet purchases could in theory double-mint tickets.
+        # Acceptable risk: concurrent cabinet purchases are rare (one user, one session),
+        # and the surrounding flow (RemnaWave sync, trial bonus, cart save) makes moving
+        # the award call inside the lock window too risky to do as part of this audit.
         await award_spin_tickets(
             db,
             user,
@@ -955,6 +960,10 @@ async def purchase_tariff(
             is_trial=bool(getattr(subscription, 'is_trial', False)),
         )
 
+        # Exclude trial-activation transactions from the first-purchase count.
+        # There is no dedicated TRIAL transaction type — trial payments use
+        # SUBSCRIPTION_PAYMENT with a fixed description (cabinet: 'Активация триальной…',
+        # bot: 'Оплата пробной…'), so filter on description.
         tx_count = (
             await db.execute(
                 select(func.count())
@@ -963,10 +972,13 @@ async def purchase_tariff(
                     Transaction.user_id == user.id,
                     Transaction.type == TransactionType.SUBSCRIPTION_PAYMENT.value,
                     Transaction.is_completed.is_(True),
+                    ~Transaction.description.ilike('%триал%'),
+                    ~Transaction.description.ilike('%пробной%'),
                 )
             )
         ).scalar()
         await award_referral_tickets(db, user, is_first_purchase=(tx_count <= 1))
+        await db.commit()
 
         response: dict[str, Any] = {
             'success': True,

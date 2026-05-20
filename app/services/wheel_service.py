@@ -2,9 +2,7 @@
 Сервис колеса удачи (Fortune Wheel) с RTP алгоритмом.
 """
 
-import random
 import secrets
-import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -12,13 +10,13 @@ from typing import Any
 
 import structlog
 from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database.crud.subscription import get_subscription_by_user_id
 from app.database.crud.user import add_user_balance
 from app.database.crud.wheel import (
-    create_wheel_spin,
     get_or_create_wheel_config,
     get_user_spins_today,
     get_wheel_prizes,
@@ -78,6 +76,7 @@ class SpinAvailability:
     spins_remaining_today: int = 0
     can_pay_stars: bool = False
     can_pay_days: bool = False
+    can_pay_tickets: bool = False
     min_subscription_days: int = 0
     user_subscription_days: int = 0
     user_balance_kopeks: int = 0
@@ -116,6 +115,10 @@ class FortuneWheelService:
         # Проверяем доступные способы оплаты
         can_pay_stars = False
         can_pay_days = False
+        can_pay_tickets = (
+            config.spin_cost_tickets_enabled
+            and (user.spin_tickets or 0) >= (config.spin_cost_tickets or 1)
+        )
         user_subscription_days = 0
         required_balance_kopeks = 0
 
@@ -157,7 +160,7 @@ class FortuneWheelService:
                 # For backward compat: use best subscription's days
                 user_subscription_days = max(s.days_left for s in eligible_subs)
 
-        if not can_pay_stars and not can_pay_days:
+        if not can_pay_stars and not can_pay_days and not can_pay_tickets:
             # Определяем причину
             reason = 'no_payment_method_available'
             if config.spin_cost_stars_enabled and user.balance_kopeks < required_balance_kopeks:
@@ -169,6 +172,7 @@ class FortuneWheelService:
                 spins_remaining_today=spins_remaining,
                 can_pay_stars=can_pay_stars,
                 can_pay_days=can_pay_days,
+                can_pay_tickets=can_pay_tickets,
                 min_subscription_days=config.min_subscription_days_for_day_payment,
                 user_subscription_days=user_subscription_days,
                 user_balance_kopeks=user.balance_kopeks,
@@ -189,6 +193,7 @@ class FortuneWheelService:
             spins_remaining_today=spins_remaining,
             can_pay_stars=can_pay_stars,
             can_pay_days=can_pay_days,
+            can_pay_tickets=can_pay_tickets,
             min_subscription_days=config.min_subscription_days_for_day_payment,
             user_subscription_days=user_subscription_days,
             user_balance_kopeks=user.balance_kopeks,
@@ -274,22 +279,27 @@ class FortuneWheelService:
         db: AsyncSession,
         user: User,
         prizes_with_probabilities: list[tuple[WheelPrize, float]],
-    ) -> WheelPrize:
-        """Выбрать приз на основе вероятностей с учетом месячных лимитов и окон доступности."""
+    ) -> WheelPrize | None:
+        """Выбрать приз на основе вероятностей с учетом месячных лимитов и окон доступности.
+
+        Returns ``None`` if no prizes remain after filtering by monthly limit / window.
+        Caller handles this as a "nothing" result. monthly_wins_count is NOT incremented
+        here — that happens atomically in spin() after the prize is successfully applied.
+        """
         if not prizes_with_probabilities:
             raise ValueError('No prizes to select from')
 
         now = datetime.now(UTC)
-        current_month = now.month
+        current_period = now.year * 100 + now.month  # e.g. 202605
         current_day = now.day
 
-        # a) Сбрасываем месячные счетчики, если сменился месяц
+        # a) Сбрасываем месячные счетчики, если сменился месяц/год
         needs_flush = False
         for prize, _ in prizes_with_probabilities:
-            if prize.monthly_limit is not None and prize.last_reset_month != current_month:
+            if prize.monthly_limit is not None and prize.last_reset_month != current_period:
                 prize.monthly_wins_count = 0
                 prize.current_month_winner = None
-                prize.last_reset_month = current_month
+                prize.last_reset_month = current_period
                 needs_flush = True
         if needs_flush:
             await db.flush()
@@ -306,8 +316,7 @@ class FortuneWheelService:
             candidates.append((prize, prob))
 
         if not candidates:
-            # Все призы отфильтрованы — откатываемся на исходный список, чтобы не падать
-            candidates = list(prizes_with_probabilities)
+            return None
 
         # c) Гарантированный дроп в последний день окна: если есть невыданные
         #    призы с monthly_limit, у которых сегодня — последний день окна,
@@ -316,7 +325,8 @@ class FortuneWheelService:
             prize
             for prize, _ in candidates
             if (
-                prize.window_end_day == current_day
+                prize.window_end_day is not None
+                and prize.window_end_day == current_day
                 and prize.monthly_limit is not None
                 and prize.monthly_wins_count < prize.monthly_limit
             )
@@ -342,12 +352,6 @@ class FortuneWheelService:
                     selected = prize
                     break
 
-        # d) Если у выбранного приза задан месячный лимит — фиксируем победителя
-        if selected.monthly_limit is not None:
-            selected.monthly_wins_count = (selected.monthly_wins_count or 0) + 1
-            selected.current_month_winner = self._mask_username(user)
-            await db.flush()
-
         return selected
 
     def _calculate_rotation(self, prizes: list[WheelPrize], selected_prize: WheelPrize) -> float:
@@ -368,13 +372,13 @@ class FortuneWheelService:
         base_angle = prize_index * sector_angle + sector_angle / 2
 
         # Добавляем случайное смещение внутри сектора (не по краям)
-        offset = random.uniform(-sector_angle * 0.3, sector_angle * 0.3)
+        offset = rng.uniform(-sector_angle * 0.3, sector_angle * 0.3)
 
         # Угол остановки (стрелка сверху, поэтому инвертируем)
         stop_angle = 360 - base_angle + offset
 
         # Добавляем несколько полных оборотов для эффекта
-        full_rotations = random.randint(5, 8) * 360
+        full_rotations = rng.randint(5, 8) * 360
 
         return full_rotations + stop_angle
 
@@ -617,31 +621,46 @@ class FortuneWheelService:
     async def _generate_prize_promocode(
         self, db: AsyncSession, user: User, prize: WheelPrize, config: WheelConfig
     ) -> PromoCode:
-        """Сгенерировать уникальный промокод для приза."""
-        # Генерируем уникальный код
-        code = f'{config.promo_prefix}{secrets.token_hex(4).upper()}'
+        """Сгенерировать уникальный промокод для приза.
 
-        # Определяем тип промокода
+        Uses 8 bytes of entropy (16 hex chars) to make collisions vanishingly rare,
+        and retries up to 3 times under a savepoint so a collision doesn't poison
+        the outer spin transaction.
+        """
         if prize.promo_subscription_days > 0:
             promo_type = PromoCodeType.SUBSCRIPTION_DAYS.value
         else:
             promo_type = PromoCodeType.BALANCE.value
 
-        promocode = PromoCode(
-            code=code,
-            type=promo_type,
-            balance_bonus_kopeks=prize.promo_balance_bonus_kopeks,
-            subscription_days=prize.promo_subscription_days,
-            max_uses=1,
-            valid_until=datetime.now(UTC) + timedelta(days=config.promo_validity_days),
-            is_active=True,
-            created_by=user.id,
-        )
+        valid_until = datetime.now(UTC) + timedelta(days=config.promo_validity_days)
 
-        db.add(promocode)
-        await db.flush()
+        for attempt in range(3):
+            code = f'{config.promo_prefix}{secrets.token_hex(8).upper()}'
+            promocode = PromoCode(
+                code=code,
+                type=promo_type,
+                balance_bonus_kopeks=prize.promo_balance_bonus_kopeks,
+                subscription_days=prize.promo_subscription_days,
+                max_uses=1,
+                valid_until=valid_until,
+                is_active=True,
+                created_by=user.id,
+            )
+            try:
+                async with db.begin_nested():
+                    db.add(promocode)
+                    await db.flush()
+                return promocode
+            except IntegrityError:
+                logger.warning(
+                    'Promocode collision detected, retrying',
+                    attempt=attempt + 1,
+                    user_id=user.id,
+                )
+                if attempt == 2:
+                    raise
 
-        return promocode
+        raise RuntimeError('Promocode generation retries exhausted')
 
     async def spin(
         self, db: AsyncSession, user: User, payment_type: str, *, subscription_id: int | None = None
@@ -649,17 +668,20 @@ class FortuneWheelService:
         """
         Выполнить спин колеса.
 
-        Шаги:
-        1. Проверить доступность
-        2. Обработать оплату
-        3. Рассчитать вероятности и выбрать приз
-        4. Применить приз
-        5. Создать запись WheelSpin
-        6. Вернуть результат
+        Порядок операций:
+        1. Cooldown check (SELECT)
+        2. Insert WheelSpin with deterministic nonce (UNIQUE constraint = concurrency lock)
+        3. Deduct payment (atomic UPDATE for tickets, in-memory for stars/days)
+        4. Select prize (_select_prize)
+        5. Apply prize (_apply_prize)
+        6. Update monthly_wins_count atomically (only if limited prize won)
+        7. Commit
         """
         try:
-            # 0. Anti-abuse cooldown: запрещаем повторный спин в течение 3 секунд
-            cooldown_threshold = datetime.now(UTC) - timedelta(seconds=3)
+            now = datetime.now(UTC)
+
+            # 1. Anti-abuse cooldown SELECT (graceful "wait" message before INSERT race)
+            cooldown_threshold = now - timedelta(seconds=3)
             recent_spin = await db.execute(
                 select(WheelSpin.id)
                 .where(WheelSpin.user_id == user.id)
@@ -673,7 +695,7 @@ class FortuneWheelService:
                     message='Подождите перед следующим вращением',
                 )
 
-            # 1. Проверяем доступность
+            # Pre-validation: availability, config, prizes, target subscription
             availability = await self.check_availability(db, user)
             if not availability.can_spin:
                 return SpinResult(
@@ -692,7 +714,6 @@ class FortuneWheelService:
                     message='Призы не настроены',
                 )
 
-            # Resolve target subscription for days payment and prize application
             target_subscription = None
             if subscription_id:
                 from app.database.crud.subscription import get_subscription_by_id_for_user
@@ -705,10 +726,8 @@ class FortuneWheelService:
                         message='Подписка не найдена или неактивна',
                     )
             elif not settings.is_multi_tariff_enabled():
-                # Single-tariff: auto-resolve
                 target_subscription = await get_subscription_by_user_id(db, user.id)
 
-            # Multi-tariff guard: subscription_id is required for days payment
             if (
                 settings.is_multi_tariff_enabled()
                 and not target_subscription
@@ -720,9 +739,37 @@ class FortuneWheelService:
                     message='Выберите подписку для оплаты днями',
                 )
 
-            # 2. Обрабатываем оплату
+            # 2. Insert WheelSpin with deterministic nonce — UNIQUE constraint acts as the
+            # real concurrency lock. Two requests from the same user within a 3-second
+            # bucket collide on the nonce; only one wins, the other gets IntegrityError.
+            spin_nonce = f'{user.id}:{int(now.timestamp() // 3)}'
+            wheel_spin = WheelSpin(
+                user_id=user.id,
+                payment_type=payment_type,
+                payment_amount=0,
+                payment_value_kopeks=0,
+                prize_type=WheelPrizeType.NOTHING.value,
+                prize_value=0,
+                prize_display_name='',
+                prize_value_kopeks=0,
+                is_applied=False,
+                spin_nonce=spin_nonce,
+            )
+            db.add(wheel_spin)
+            try:
+                await db.flush()
+            except IntegrityError:
+                await db.rollback()
+                return SpinResult(
+                    success=False,
+                    error='cooldown',
+                    message='Подождите перед следующим вращением',
+                )
+
+            # 3. Process payment
             if payment_type == WheelSpinPaymentType.TELEGRAM_STARS.value:
                 if not availability.can_pay_stars:
+                    await db.rollback()
                     return SpinResult(
                         success=False,
                         error='cannot_pay_stars',
@@ -732,6 +779,7 @@ class FortuneWheelService:
                 payment_value_kopeks = await self._process_stars_payment(db, user, config)
             elif payment_type == WheelSpinPaymentType.SUBSCRIPTION_DAYS.value:
                 if not availability.can_pay_days:
+                    await db.rollback()
                     return SpinResult(
                         success=False,
                         error='cannot_pay_days',
@@ -741,17 +789,41 @@ class FortuneWheelService:
                 payment_value_kopeks = await self._process_days_payment(db, user, config, target_subscription)
             elif payment_type == WheelSpinPaymentType.TICKETS.value:
                 if not config.spin_cost_tickets_enabled:
+                    await db.rollback()
                     return SpinResult(
                         success=False,
                         error='cannot_pay_tickets',
                         message='Оплата билетами недоступна',
                     )
+
+                # Anti-abuse: require an active subscription to spend tickets.
+                # In multi-tariff target_subscription may be None even when the user
+                # has active subs — check the full active list as a fallback.
+                has_active_subscription = bool(
+                    target_subscription and target_subscription.is_active
+                )
+                if not has_active_subscription and settings.is_multi_tariff_enabled():
+                    from app.database.crud.subscription import (
+                        get_active_subscriptions_by_user_id,
+                    )
+
+                    active_subs = await get_active_subscriptions_by_user_id(db, user.id)
+                    has_active_subscription = any(s.is_active for s in active_subs)
+                if not has_active_subscription:
+                    await db.rollback()
+                    return SpinResult(
+                        success=False,
+                        error='no_subscription',
+                        message='Необходима активная подписка',
+                    )
+
                 result = await db.execute(
                     update(User)
                     .where(User.id == user.id, User.spin_tickets >= config.spin_cost_tickets)
                     .values(spin_tickets=User.spin_tickets - config.spin_cost_tickets)
                 )
                 if result.rowcount == 0:
+                    await db.rollback()
                     return SpinResult(
                         success=False,
                         error='insufficient_tickets',
@@ -768,55 +840,91 @@ class FortuneWheelService:
                 payment_amount = config.spin_cost_tickets
                 payment_value_kopeks = 0
             else:
+                await db.rollback()
                 return SpinResult(
                     success=False,
                     error='invalid_payment_type',
                     message='Неверный способ оплаты',
                 )
 
-            # 3. Рассчитываем вероятности и выбираем приз
+            # 4. Select prize
             prizes_with_probs = self.calculate_prize_probabilities(config, prizes, payment_value_kopeks)
             selected_prize = await self._select_prize(db, user, prizes_with_probs)
 
-            # 4. Рассчитываем угол для анимации
+            # No candidates after filtering — user paid but gets nothing
+            if selected_prize is None:
+                wheel_spin.payment_amount = payment_amount
+                wheel_spin.payment_value_kopeks = payment_value_kopeks
+                wheel_spin.prize_type = WheelPrizeType.NOTHING.value
+                wheel_spin.prize_display_name = 'Пусто'
+                wheel_spin.is_applied = True
+                wheel_spin.applied_at = datetime.now(UTC)
+                await db.commit()
+                return SpinResult(
+                    success=True,
+                    prize_type=WheelPrizeType.NOTHING.value,
+                    prize_display_name='Пусто',
+                    message='К сожалению, в этот раз не повезло. Попробуйте еще!',
+                )
+
+            # 5. Apply prize
+            generated_promocode = await self._apply_prize(db, user, selected_prize, config, target_subscription)
+
+            # 6. Atomic monthly_wins_count UPDATE — only if prize has a monthly limit.
+            # Done AFTER _apply_prize so a failed apply doesn't consume the slot.
+            if selected_prize.monthly_limit is not None:
+                masked_name = self._mask_username(user)
+                claim_result = await db.execute(
+                    update(WheelPrize)
+                    .where(
+                        WheelPrize.id == selected_prize.id,
+                        WheelPrize.monthly_wins_count < selected_prize.monthly_limit,
+                    )
+                    .values(
+                        monthly_wins_count=WheelPrize.monthly_wins_count + 1,
+                        current_month_winner=masked_name,
+                    )
+                )
+                if claim_result.rowcount == 0:
+                    # Race: another request filled the slot first. Prize is already
+                    # applied to the user, so we can't undo — just log and continue.
+                    logger.warning(
+                        'Monthly wins slot exhausted under race; prize still applied',
+                        prize_id=selected_prize.id,
+                        user_id=user.id,
+                    )
+
+            # Rotation for animation, and resolve promocode id
             rotation = self._calculate_rotation(prizes, selected_prize)
 
-            # 5. Применяем приз
-            generated_promocode = await self._apply_prize(db, user, selected_prize, config, target_subscription)
             promocode_id = None
             if generated_promocode:
-                # Получаем ID промокода
                 from sqlalchemy import text
 
-                result = await db.execute(
-                    text('SELECT id FROM promocodes WHERE code = :code'), {'code': generated_promocode}
+                pc_result = await db.execute(
+                    text('SELECT id FROM promocodes WHERE code = :code'),
+                    {'code': generated_promocode},
                 )
-                row = result.fetchone()
+                row = pc_result.fetchone()
                 if row:
                     promocode_id = row[0]
 
-            # 6. Создаем запись спина
-            await create_wheel_spin(
-                db=db,
-                user_id=user.id,
-                prize_id=selected_prize.id,
-                payment_type=payment_type,
-                payment_amount=payment_amount,
-                payment_value_kopeks=payment_value_kopeks,
-                prize_type=selected_prize.prize_type,
-                prize_value=selected_prize.prize_value,
-                prize_display_name=selected_prize.display_name,
-                prize_value_kopeks=selected_prize.prize_value_kopeks,
-                generated_promocode_id=promocode_id,
-                is_applied=True,
-                spin_nonce=str(uuid.uuid4()),
-            )
+            # Finalize the WheelSpin record with actual prize info
+            wheel_spin.prize_id = selected_prize.id
+            wheel_spin.payment_amount = payment_amount
+            wheel_spin.payment_value_kopeks = payment_value_kopeks
+            wheel_spin.prize_type = selected_prize.prize_type
+            wheel_spin.prize_value = selected_prize.prize_value
+            wheel_spin.prize_display_name = selected_prize.display_name
+            wheel_spin.prize_value_kopeks = selected_prize.prize_value_kopeks
+            wheel_spin.generated_promocode_id = promocode_id
+            wheel_spin.is_applied = True
+            wheel_spin.applied_at = datetime.now(UTC)
 
+            # 7. Commit
             await db.commit()
 
-            # 7. Формируем результат
             message = self._get_prize_message(selected_prize, generated_promocode)
-
             return SpinResult(
                 success=True,
                 prize_id=selected_prize.id,

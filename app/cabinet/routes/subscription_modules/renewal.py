@@ -273,6 +273,7 @@ async def renew_subscription(
         period_days=request.period_days,
         is_trial=False,
     )
+    await db.commit()
 
     response: dict[str, Any] = {
         'message': 'Subscription renewed successfully',
