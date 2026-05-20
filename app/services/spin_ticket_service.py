@@ -51,6 +51,7 @@ async def award_spin_tickets(
 
     user.spin_tickets = (user.spin_tickets or 0) + tickets
     await db.flush()
+    await db.commit()
 
     logger.info(
         '🎟️ Spin tickets awarded',
