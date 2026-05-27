@@ -974,6 +974,7 @@ async def purchase_tariff(
                     Transaction.is_completed.is_(True),
                     ~Transaction.description.ilike('%триал%'),
                     ~Transaction.description.ilike('%пробной%'),
+                    ~Transaction.description.ilike('%переход на тариф%'),
                 )
             )
         ).scalar()
